@@ -105,7 +105,7 @@
     .team-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 19.5px; font-weight: 700; }
     .team-b { text-align: right; }
     .score-fields { display: flex; align-items: center; gap: 6px; }
-    .score-fields input, .score-fields output { width: 54px; height: 42px; }
+    .score-fields input, .score-fields output { width: 64px; height: 42px; }
     .score-fields output {
       display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px;
       color: var(--green); background: #202c26; font-weight: 700;
@@ -130,7 +130,8 @@
     summary::-webkit-details-marker { display: none; }
     summary::after { content: "+"; color: var(--green); }
     details[open] summary::after { content: "−"; }
-    .history-line { display: flex; justify-content: space-between; gap: 14px; padding: 7px 0 12px; color: var(--muted); font-size: 18px; }
+    .history-line { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 7px 0 12px; color: var(--muted); font-size: 18px; }
+    .history-teams { min-width: 0; }
     .history-line strong { color: var(--text); }
     .empty { margin: 0; padding: 16px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 19.5px; text-align: center; }
     .notice { margin: 0; padding: 10px 12px; border-radius: 10px; color: #e8f4d0; background: var(--green-dark); font-size: 18px; line-height: 1.5; }
@@ -153,7 +154,8 @@
       .next-row { align-items: flex-start; flex-direction: column; }
       .teams { gap: 6px; }
       .team-name { font-size: 18px; }
-      .score-fields input { width: 46px; }
+      .score-fields input { width: 64px; }
+      .history-line { align-items: flex-start; flex-direction: column; }
       td, th { padding-right: 5px; padding-left: 5px; }
     }
   </style>
@@ -233,7 +235,7 @@
             </div>
           </section>
           <section class="panel">
-            <div class="panel-heading"><div><h2>Odehraná kola</h2><p>Přehled zadaných výsledků.</p></div></div>
+            <div class="panel-heading"><div><h2>Odehraná kola</h2><p>Přehled a oprava výsledků předchozích kol.</p></div></div>
             <div id="history"></div>
           </section>
         </div>
@@ -325,6 +327,17 @@
         match.scoreB = match.scoreA !== "" && Number.isInteger(scoreA) && scoreA >= 0 && scoreA <= state.points
           ? String(state.points - scoreA)
           : "";
+      }
+
+      function updateScoreFromInput(input, match) {
+        const value = input.value;
+        if (value !== "" && (!Number.isInteger(Number(value)) || Number(value) < 0 || Number(value) > state.points)) {
+          input.setCustomValidity("Zadejte celé číslo od 0 do " + state.points + ".");
+        } else {
+          input.setCustomValidity("");
+        }
+        match.scoreA = value;
+        updateComputedScore(match);
       }
 
       function getStats() {
@@ -524,14 +537,18 @@
         }
         history.innerHTML = rounds.map(function (round, reverseIndex) {
           const roundNumber = state.rounds.length - 1 - reverseIndex;
-          const matches = round.matches.map(function (match) {
-            const result = getMatchResult(match);
+          const roundIndex = roundNumber - 1;
+          const matches = round.matches.map(function (match, matchIndex) {
             const a = match.teamA.map(function (id) { return escapeHtml(playerName(id)); }).join(" &amp; ");
             const b = match.teamB.map(function (id) { return escapeHtml(playerName(id)); }).join(" &amp; ");
-            return '<div class="history-line"><span>Kurt ' + match.court + ' · ' + a + ' <strong>' +
-              (result ? result.a + " : " + result.b : "–") + '</strong> ' + b + '</span></div>';
+            return '<div class="history-line"><span class="history-teams">Kurt ' + match.court + ' · ' + a + ' vs. ' + b + '</span>' +
+              '<div class="score-fields history-score-fields">' +
+              '<input aria-label="Body první dvojice, ' + roundNumber + '. kolo, kurt ' + match.court + '" type="number" min="0" max="' + state.points + '" step="1" inputmode="numeric" data-history-score="' + roundIndex + ':' + matchIndex + '" value="' + escapeHtml(match.scoreA) + '">' +
+              '<span class="score-dash">:</span>' +
+              '<output aria-label="Body druhé dvojice, dopočítané automaticky">' + (match.scoreB === "" ? "–" : escapeHtml(match.scoreB)) + '</output>' +
+              '</div></div>';
           }).join("");
-          return '<details><summary><span>' + roundNumber + '. kolo</span><span class="match-status">' +
+          return '<details><summary><span>' + roundNumber + '. kolo</span><span class="match-status history-progress">' +
             round.matches.filter(function (match) { return getMatchResult(match); }).length + ' / ' + round.matches.length + ' zápasů</span></summary>' + matches + '</details>';
         }).join("");
       }
@@ -640,16 +657,26 @@
         const parts = input.dataset.score.split(":");
         const match = state.rounds[state.rounds.length - 1].matches[Number(parts[0])];
         if (!match) return;
-        const value = input.value;
-        if (value !== "" && (!Number.isInteger(Number(value)) || Number(value) < 0 || Number(value) > state.points)) {
-          input.setCustomValidity("Zadejte celé číslo od 0 do " + state.points + ".");
-        } else {
-          input.setCustomValidity("");
-        }
-        match.scoreA = value;
-        updateComputedScore(match);
+        updateScoreFromInput(input, match);
         persist();
         refreshScores();
+      });
+
+      document.getElementById("history").addEventListener("input", function (event) {
+        const input = event.target;
+        if (!input.matches("[data-history-score]")) return;
+        const parts = input.dataset.historyScore.split(":").map(Number);
+        const round = state.rounds[parts[0]];
+        const match = round && round.matches[parts[1]];
+        if (!match) return;
+        updateScoreFromInput(input, match);
+        input.parentElement.querySelector("output").textContent = match.scoreB === "" ? "–" : match.scoreB;
+        input.closest("details").querySelector(".history-progress").textContent =
+          round.matches.filter(function (item) { return getMatchResult(item); }).length + " / " + round.matches.length + " zápasů";
+        persist();
+        const stats = getStats();
+        renderStandings(stats);
+        renderPlayerList(stats);
       });
 
       document.getElementById("next-round").addEventListener("click", function () {
